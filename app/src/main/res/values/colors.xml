@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="aura_blue">#2196F3</color>
+    <color name="aura_blue_dark">#1976D2</color>
+    <color name="aura_accent">#FF9800</color>
+    <color name="overlay_background">#80000000</color>
+    <color name="overlay_text">#FFFFFF</color>
+    <color name="listening_indicator">#4CAF50</color>
+    <color name="processing_indicator">#FF9800</color>
+</resources>

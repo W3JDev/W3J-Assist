@@ -1,0 +1,20 @@
+<resources>
+    <string name="app_name">Project Aura</string>
+    <string name="overlay_title">Aura Assistant</string>
+    <string name="listening">Listening...</string>
+    <string name="processing">Processing...</string>
+    <string name="permission_camera">Camera permission is required for OCR functionality</string>
+    <string name="permission_microphone">Microphone permission is required for voice activation</string>
+    <string name="permission_overlay">Overlay permission is required for discreet UI</string>
+    <string name="wake_word_detected">Wake word detected</string>
+    <string name="ocr_mode">OCR Mode</string>
+    <string name="saved_notes">Saved Notes</string>
+    <string name="no_notes">No notes saved yet</string>
+    <string name="enable_overlay">Enable Overlay</string>
+    <string name="disable_overlay">Disable Overlay</string>
+    <string name="start_listening">Start Listening</string>
+    <string name="stop_listening">Stop Listening</string>
+    <string name="camera_mode">Camera Mode</string>
+    <string name="text_detected">Text detected: %s</string>
+    <string name="ai_response">AI Response: %s</string>
+</resources>
