@@ -161,6 +161,22 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                         Text("OCR Mode")
                     }
                 }
+                
+                Button(
+                    onClick = { viewModel.startInsightPlayground(context) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary
+                    )
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Psychology, contentDescription = null)
+                        Text("Insight Playground")
+                    }
+                }
             }
         }
         

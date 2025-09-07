@@ -41,6 +41,11 @@
             android:name=".OCRActivity"
             android:exported="false"
             android:theme="@style/Theme.ProjectAura" />
+            
+        <activity
+            android:name=".InsightPlaygroundActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ProjectAura" />
         
         <!-- Overlay Service for UI-01 -->
         <service
