@@ -65,6 +65,11 @@ class MainViewModel : ViewModel() {
         context.startActivity(intent)
     }
     
+    fun startInsightPlayground(context: Context) {
+        val intent = Intent(context, com.aura.app.InsightPlaygroundActivity::class.java)
+        context.startActivity(intent)
+    }
+    
     fun deleteResponse(response: SavedResponse) {
         viewModelScope.launch {
             database.savedResponseDao().deleteResponse(response)
