@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import com.aura.app.AuraApplication
 import com.aura.app.MainActivity
 import com.aura.app.utils.GeminiClient
+import com.aura.app.utils.VoiceCommandProcessor
 import kotlinx.coroutines.*
 import java.io.File
 import java.nio.ByteBuffer
@@ -23,6 +24,8 @@ class WakeWordService : Service() {
     private var isListening = false
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val geminiClient = GeminiClient()
+    private lateinit var voiceCommandProcessor: VoiceCommandProcessor
+    private var isPaused = false
     
     companion object {
         private const val NOTIFICATION_ID = 1
@@ -32,12 +35,23 @@ class WakeWordService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        voiceCommandProcessor = VoiceCommandProcessor(this)
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, createNotification())
-        initializePorcupine()
-        startListening()
+        
+        when (intent?.action) {
+            "RESUME_LISTENING" -> {
+                resumeListening()
+            }
+            else -> {
+                // Handle normal service startup when no specific action is provided
+                initializePorcupine()
+                startListening()
+            }
+        }
+        
         return START_STICKY
     }
     
@@ -161,11 +175,30 @@ class WakeWordService : Service() {
     }
     
     private fun handleWakeWordDetected() {
+        if (isPaused) return
+        
         scope.launch {
             // Start recording for a few seconds to capture the command
             val command = recordAudioCommand()
             if (command.isNotEmpty()) {
-                val response = geminiClient.processText(command)
+                // Check if it's a voice command first
+                val response = if (voiceCommandProcessor.isVoiceCommand(command)) {
+                    val result = voiceCommandProcessor.processVoiceCommand(command)
+                    
+                    // Handle pause command specially
+                    if (command.lowercase().contains("pause")) {
+                        isPaused = true
+                        // Send broadcast to OverlayService to show paused status
+                        sendBroadcast(Intent("com.aura.app.PAUSE_STATUS").apply {
+                            putExtra("isPaused", true)
+                        })
+                    }
+                    
+                    result
+                } else {
+                    // Process with AI if not a voice command
+                    geminiClient.processText(command)
+                }
                 
                 // Save to database
                 val database = AuraApplication.instance.database
@@ -177,10 +210,23 @@ class WakeWordService : Service() {
                 )
                 database.savedResponseDao().insertResponse(savedResponse)
                 
-                // Show response in overlay (if active)
-                // TODO: Communicate with OverlayService to show response
+                // Send broadcast to OverlayService to show response
+                sendBroadcast(Intent("com.aura.app.VOICE_RESPONSE").apply {
+                    putExtra("response", response)
+                    putExtra("command", command)
+                })
             }
         }
+    }
+    
+    /**
+     * Resume voice recognition from pause
+     */
+    fun resumeListening() {
+        isPaused = false
+        sendBroadcast(Intent("com.aura.app.PAUSE_STATUS").apply {
+            putExtra("isPaused", false)
+        })
     }
     
     private suspend fun recordAudioCommand(): String {
@@ -195,6 +241,7 @@ class WakeWordService : Service() {
         audioRecord?.stop()
         audioRecord?.release()
         porcupine?.delete()
+        voiceCommandProcessor.cleanup()
         scope.cancel()
     }
 }
