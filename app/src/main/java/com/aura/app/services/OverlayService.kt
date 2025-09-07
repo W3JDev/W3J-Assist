@@ -34,7 +34,15 @@ import com.aura.app.AuraApplication
 import com.aura.app.models.*
 import com.aura.app.ui.components.*
 import com.aura.app.ui.theme.ProjectAuraTheme
+import com.aura.app.utils.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 
 class OverlayService : Service() {
     
@@ -48,13 +56,44 @@ class OverlayService : Service() {
     private val _lastResponse  mutableStateOf("")
     private val _isPaused  mutableStateOf(false)
     
+    // Enhanced accessibility and performance systems
+    private lateinit var accessibilityManager: AccessibilityManager
+    private lateinit var performanceMonitor: PerformanceMonitor
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    
+    // Enhanced state management for real-time updates
+    private val _liveInsights = mutableStateOf<List<Insight>>(emptyList())
+    private val _isExpanded = mutableStateOf(false)
+    private val _currentProcessingConfig = mutableStateOf(ProcessingConfig(
+        updateInterval = 100L,
+        confidenceThreshold = 0.5f,
+        enableAnimations = true,
+        enableHapticFeedback = true,
+        enableAudioCues = true,
+        maxConcurrentInsights = 10,
+        enableRealTimeProcessing = true
+    ))
+    
     override fun onBind(intent: Intent?): IBinder?  null
     
     override fun onCreate() {
         super.onCreate()
+        
+        // Initialize accessibility and performance systems
+        accessibilityManager = AccessibilityManager(this)
+        performanceMonitor = PerformanceMonitor(this)
+        
+        // Monitor performance changes and adapt
+        serviceScope.launch {
+            performanceMonitor.processingQuality.collect { quality ->
+                _currentProcessingConfig.value = performanceMonitor.getProcessingConfig()
+            }
+        }
+        
         if (Settings.canDrawOverlays(this)) {
             createOverlay()
             setupBroadcastReceivers()
+            startPerformanceOptimizedUpdates()
         }
     }
     
@@ -64,14 +103,49 @@ class OverlayService : Service() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 val response  intent?.getStringExtra("response") ?: ""
                 val command  intent?.getStringExtra("command") ?: ""
+                val insightType = intent?.getStringExtra("insightType")?.let { 
+                    InsightType.valueOf(it) 
+                } ?: InsightType.TALKING_POINT
+                val confidence = intent?.getFloatExtra("confidence", 0.8f) ?: 0.8f
+                
                 _status.value  "Response"
                 _lastResponse.value  response
                 
-                // Auto-clear after 10 seconds
+                // Add new insight to live insights with performance optimization
+                val currentInsights = _liveInsights.value.toMutableList()
+                val config = _currentProcessingConfig.value
+                
+                if (currentInsights.size >= config.maxConcurrentInsights) {
+                    currentInsights.removeFirst() // Remove oldest insight
+                }
+                
+                val newInsight = Insight(
+                    timestamp = System.currentTimeMillis(),
+                    content = response,
+                    confidence = confidence,
+                    type = insightType
+                )
+                
+                currentInsights.add(newInsight)
+                _liveInsights.value = currentInsights
+                
+                // Provide accessibility feedback if enabled
+                if (performanceMonitor.shouldEnableFeature(PerformanceFeature.HAPTIC_FEEDBACK)) {
+                    accessibilityManager.vibrateForInsight(insightType, confidence)
+                }
+                
+                if (performanceMonitor.shouldEnableFeature(PerformanceFeature.AUDIO_CUES)) {
+                    accessibilityManager.playAudioCueForInsight(insightType, confidence)
+                }
+                
+                // Smart notification for important insights
+                accessibilityManager.notifyImportantInsight(insightType, confidence, response)
+                
+                // Auto-clear with adaptive timing
                 android.os.Handler(mainLooper).postDelayed({
                     _status.value  if (_isPaused.value) "Paused" else "Ready"
                     _lastResponse.value  ""
-                }, 10000)
+                }, config.updateInterval * 100) // Adaptive clear timing
             }
         }
         
@@ -154,9 +228,32 @@ fun OverlayContent(
 ) {
     var isDragging by remember { mutableStateOf(false) }
     var isExpanded by remember { mutableStateOf(false) }
-    var liveInsights by remember { mutableStateOf(listOfInsight()) }
-    var suggestions by remember { mutableStateOf(listOfSmartSuggestion()) }
+    var liveInsights by remember { mutableStateOf(listOf<Insight>()) }
+    var suggestions by remember { mutableStateOf(listOf<SmartSuggestion>()) }
     var showLiveMode by remember { mutableStateOf(false) }
+    
+    // Clipboard manager for copy functionality
+    val clipboardManager = LocalClipboardManager.current
+    
+    // Enhanced gesture handlers
+    val handleToggleExpanded = { isExpanded = !isExpanded }
+    val handleCopyContent = {
+        val contentToCopy = if (lastResponse.isNotEmpty()) lastResponse else "No content to copy"
+        clipboardManager.setText(AnnotatedString(contentToCopy))
+    }
+    val handleVoiceReadback = {
+        // Voice readback functionality - would integrate with AccessibilityManager
+        // For now, just toggle show live mode as demo
+        showLiveMode = !showLiveMode
+    }
+    val handleDismiss = {
+        isExpanded = false
+        onClose()
+    }
+    val handleMove = { startPos: Offset, currentPos: Offset ->
+        // Drag movement - this would update overlay position
+        isDragging = true
+    }
     
  
     // Simulate live insights for demo
@@ -200,14 +297,13 @@ fun OverlayContent(
                         MaterialTheme.colorScheme.surface.copy(alpha  0.95f),
                         RoundedCornerShape(16.dp)
                     )
-                    .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragStart  { isDragging  true },
-                            onDragEnd  { isDragging  false }
-                        ) { _, _ -
-                            // Handle drag movement
-                        }
-                    },
+                    .overlayGestureDetection(
+                        onToggleExpanded = handleToggleExpanded,
+                        onCopyContent = handleCopyContent,
+                        onVoiceReadback = handleVoiceReadback,
+                        onDismiss = handleDismiss,
+                        onMove = handleMove
+                    ),
                 colors  CardDefaults.cardColors(
                     containerColor  MaterialTheme.colorScheme.surface.copy(alpha  0.95f)
                 ),
@@ -478,14 +574,13 @@ fun OverlayContent(
                         Color.Black.copy(alpha  0.8f),
                         RoundedCornerShape(12.dp)
                     )
-                    .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragStart  { isDragging  true },
-                            onDragEnd  { isDragging  false }
-                        ) { _, _ -
-                            // Handle drag movement
-                        }
-                    },
+                    .overlayGestureDetection(
+                        onToggleExpanded = handleToggleExpanded,
+                        onCopyContent = handleCopyContent,
+                        onVoiceReadback = handleVoiceReadback,
+                        onDismiss = handleDismiss,
+                        onMove = handleMove
+                    ),
                 colors  CardDefaults.cardColors(
                     containerColor  Color.Black.copy(alpha  0.8f)
                 ),
@@ -589,5 +684,55 @@ fun OverlayContent(
                 }
             }
         }
+    }
+    
+    /**
+     * Start performance-optimized real-time updates
+     */
+    private fun startPerformanceOptimizedUpdates() {
+        serviceScope.launch {
+            while (true) {
+                val config = _currentProcessingConfig.value
+                
+                if (config.enableRealTimeProcessing && _liveInsights.value.isNotEmpty()) {
+                    // Simulate real-time insight updates with performance-aware timing
+                    delay(config.updateInterval)
+                    
+                    // Optional: Update insight confidence scores or add new insights
+                    // This would be connected to real AI processing in production
+                } else {
+                    // Use longer intervals when real-time processing is disabled
+                    delay(config.updateInterval * 5)
+                }
+            }
+        }
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        
+        // Cleanup enhanced systems
+        accessibilityManager.cleanup()
+        performanceMonitor.cleanup()
+        
+        // Cleanup existing functionality
+        try {
+            unregisterReceiver(voiceResponseReceiver)
+            unregisterReceiver(pauseStatusReceiver)
+        } catch (e: Exception) {
+            // Receivers may not be registered
+        }
+        
+        overlayView?.let { view ->
+            try {
+                windowManager?.removeView(view)
+            } catch (e: Exception) {
+                // View may not be attached
+            }
+        }
+    }
+    
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY
     }
 }
