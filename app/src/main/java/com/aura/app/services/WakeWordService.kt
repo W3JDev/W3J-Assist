@@ -46,6 +46,7 @@ class WakeWordService : Service() {
                 resumeListening()
             }
             else -> {
+                // Handle normal service startup when no specific action is provided
                 initializePorcupine()
                 startListening()
             }
