@@ -1,7 +1,6 @@
 package com.aura.app.services
-
 import android.app.Service
-import android.content.Intent
+import android.content.*
 import android.graphics.PixelFormat
 import android.os.IBinder
 import android.provider.Settings
@@ -25,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -38,37 +38,81 @@ import kotlinx.coroutines.delay
 
 class OverlayService : Service() {
     
-    private var windowManager: WindowManager? = null
-    private var overlayView: View? = null
+    private var windowManager: WindowManager?  null
+    private var overlayView: View?  null
+    private lateinit var voiceResponseReceiver: BroadcastReceiver
+    private lateinit var pauseStatusReceiver: BroadcastReceiver
     
-    override fun onBind(intent: Intent?): IBinder? = null
+    // Mutable state for the overlay content
+    private val _status  mutableStateOf("Ready")
+    private val _lastResponse  mutableStateOf("")
+    private val _isPaused  mutableStateOf(false)
+    
+    override fun onBind(intent: Intent?): IBinder?  null
     
     override fun onCreate() {
         super.onCreate()
         if (Settings.canDrawOverlays(this)) {
             createOverlay()
+            setupBroadcastReceivers()
         }
     }
     
-    private fun createOverlay() {
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+    private fun setupBroadcastReceivers() {
+        // Receiver for voice responses
+        voiceResponseReceiver  object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val response  intent?.getStringExtra("response") ?: ""
+                val command  intent?.getStringExtra("command") ?: ""
+                _status.value  "Response"
+                _lastResponse.value  response
+                
+                // Auto-clear after 10 seconds
+                android.os.Handler(mainLooper).postDelayed({
+                    _status.value  if (_isPaused.value) "Paused" else "Ready"
+                    _lastResponse.value  ""
+                }, 10000)
+            }
+        }
         
-        val composeView = ComposeView(this).apply {
+        // Receiver for pause status
+        pauseStatusReceiver  object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val isPaused  intent?.getBooleanExtra("isPaused", false) ?: false
+                _isPaused.value  isPaused
+                _status.value  if (isPaused) "Paused" else "Ready"
+            }
+        }
+        
+        // Register receivers
+        val voiceFilter  IntentFilter("com.aura.app.VOICE_RESPONSE")
+        val pauseFilter  IntentFilter("com.aura.app.PAUSE_STATUS")
+        registerReceiver(voiceResponseReceiver, voiceFilter)
+        registerReceiver(pauseStatusReceiver, pauseFilter)
+    }
+    
+    private fun createOverlay() {
+        windowManager  getSystemService(WINDOW_SERVICE) as WindowManager
+        
+        val composeView  ComposeView(this).apply {
             setContent {
                 ProjectAuraTheme {
                     OverlayContent(
-                        onClose = { stopSelf() }
+                        status  _status.value,
+                        lastResponse  _lastResponse.value,
+                        isPaused  _isPaused.value,
+                        onClose  { stopSelf() }
                     )
                 }
             }
         }
         
         // Wrap ComposeView in a FrameLayout for proper overlay behavior
-        val frameLayout = FrameLayout(this).apply {
+        val frameLayout  FrameLayout(this).apply {
             addView(composeView)
         }
         
-        val params = WindowManager.LayoutParams(
+        val params  WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -77,50 +121,59 @@ class OverlayService : Service() {
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = 100
-            y = 100
+            gravity  Gravity.TOP or Gravity.START
+            x  100
+            y  100
         }
         
-        overlayView = frameLayout
+        overlayView  frameLayout
         windowManager?.addView(frameLayout, params)
     }
     
     override fun onDestroy() {
         super.onDestroy()
-        overlayView?.let { view ->
+        overlayView?.let { view -
             windowManager?.removeView(view)
+        }
+        // Unregister broadcast receivers
+        try {
+            unregisterReceiver(voiceResponseReceiver)
+            unregisterReceiver(pauseStatusReceiver)
+        } catch (e: Exception) {
+            // Receivers might not be registered
         }
     }
 }
 
 @Composable
 fun OverlayContent(
-    onClose: () -> Unit
+    status: String,
+    lastResponse: String,
+    isPaused: Boolean,
+    onClose: () - Unit
 ) {
-    var status by remember { mutableStateOf("Ready") }
-    var lastResponse by remember { mutableStateOf("") }
     var isDragging by remember { mutableStateOf(false) }
     var isExpanded by remember { mutableStateOf(false) }
-    var liveInsights by remember { mutableStateOf(listOf<Insight>()) }
-    var suggestions by remember { mutableStateOf(listOf<SmartSuggestion>()) }
+    var liveInsights by remember { mutableStateOf(listOfInsight()) }
+    var suggestions by remember { mutableStateOf(listOfSmartSuggestion()) }
     var showLiveMode by remember { mutableStateOf(false) }
     
+ 
     // Simulate live insights for demo
     LaunchedEffect(showLiveMode) {
         if (showLiveMode) {
             delay(1000)
-            liveInsights = listOf(
+            liveInsights  listOf(
                 Insight(
-                    timestamp = System.currentTimeMillis(),
-                    content = "Active conversation detected",
-                    confidence = 0.95f,
-                    type = InsightType.TALKING_POINT
+                    timestamp  System.currentTimeMillis(),
+                    content  "Active conversation detected",
+                    confidence  0.95f,
+                    type  InsightType.TALKING_POINT
                 )
             )
             
             delay(2000)
-            suggestions = listOf(
+            suggestions  listOf(
                 SmartSuggestion("1", "Ask follow-up", "followup", 0.8f),
                 SmartSuggestion("2", "Clarify point", "clarify", 0.7f)
             )
@@ -128,177 +181,276 @@ fun OverlayContent(
     }
     
     AnimatedContent(
-        targetState = isExpanded,
-        transitionSpec = {
+        targetState  isExpanded,
+        transitionSpec  {
             slideInHorizontally(
-                initialOffsetX = { if (targetState) it else -it }
+                initialOffsetX  { if (targetState) it else -it }
             ) with slideOutHorizontally(
-                targetOffsetX = { if (targetState) -it else it }
+                targetOffsetX  { if (targetState) -it else it }
             )
         },
-        label = "overlay_expansion"
-    ) { expanded ->
+        label  "overlay_expansion"
+    ) { expanded -
         if (expanded) {
             // Expanded Live Insight Mode
             Card(
-                modifier = Modifier
-                    .size(width = 320.dp, height = 480.dp)
+                modifier  Modifier
+                    .size(width  320.dp, height  480.dp)
                     .background(
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                        MaterialTheme.colorScheme.surface.copy(alpha  0.95f),
                         RoundedCornerShape(16.dp)
                     )
                     .pointerInput(Unit) {
                         detectDragGestures(
-                            onDragStart = { isDragging = true },
-                            onDragEnd = { isDragging = false }
-                        ) { _, _ ->
+                            onDragStart  { isDragging  true },
+                            onDragEnd  { isDragging  false }
+                        ) { _, _ -
                             // Handle drag movement
                         }
                     },
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                colors  CardDefaults.cardColors(
+                    containerColor  MaterialTheme.colorScheme.surface.copy(alpha  0.95f)
                 ),
-                shape = RoundedCornerShape(16.dp)
+                shape  RoundedCornerShape(16.dp)
+
+    Card(
+        modifier  Modifier
+            .size(width  250.dp, height  if (lastResponse.isNotEmpty()) 150.dp else 100.dp)
+            .background(
+                Color.Black.copy(alpha  0.8f), 
+                RoundedCornerShape(12.dp)
+            )
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart  { isDragging  true },
+                    onDragEnd  { isDragging  false }
+                ) { _, _ -
+                    // Handle drag movement
+                }
+            },
+        colors  CardDefaults.cardColors(
+            containerColor  Color.Black.copy(alpha  0.8f)
+        ),
+        shape  RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier  Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            verticalArrangement  Arrangement.SpaceBetween
+        ) {
+            // Header with status and close button
+            Row(
+                modifier  Modifier.fillMaxWidth(),
+                horizontalArrangement  Arrangement.SpaceBetween,
+                verticalAlignment  Alignment.CenterVertically
+            ) {
+                Text(
+                    text  "Aura",
+                    color  Color.White,
+                    fontSize  12.sp,
+                    fontWeight  FontWeight.Bold
+                )
+                IconButton(
+                    onClick  onClose,
+                    modifier  Modifier.size(20.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription  "Close",
+                        tint  Color.White,
+                        modifier  Modifier.size(12.dp)
+                    )
+                }
+            }
+            
+            // Status indicator
+            Row(
+                verticalAlignment  Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier  Modifier
+                        .size(8.dp)
+                        .background(
+                            when {
+                                isPaused - Color.Red
+                                status  "Ready" - Color.Green
+                                status  "Response" - Color.Blue
+                                else - Color.Yellow
+                            },
+                            androidx.compose.foundation.shape.CircleShape
+                        )
+                )
+                Spacer(modifier  Modifier.width(8.dp))
+                Text(
+                    text  status,
+                    color  Color.White,
+                    fontSize  11.sp
+                )
+            }
+            
+            // Response text (if available)
+            if (lastResponse.isNotEmpty()) {
+                Text(
+                    text  lastResponse,
+                    color  Color.White.copy(alpha  0.9f),
+                    fontSize  10.sp,
+                    maxLines  3,
+                    overflow  TextOverflow.Ellipsis,
+                    modifier  Modifier.padding(top  4.dp)
+                )
+            }
+        }
+    }
+}
+                .padding(12.dp),
+            verticalArrangement  Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier  Modifier.fillMaxWidth(),
+                horizontalArrangement  Arrangement.SpaceBetween,
+                verticalAlignment  Alignment.Top
+ 
             ) {
                 Column(
-                    modifier = Modifier
+                    modifier  Modifier
                         .fillMaxSize()
                         .padding(16.dp)
                 ) {
                     // Header
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier  Modifier.fillMaxWidth(),
+                        horizontalArrangement  Arrangement.SpaceBetween,
+                        verticalAlignment  Alignment.CenterVertically
                     ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalAlignment  Alignment.CenterVertically,
+                            horizontalArrangement  Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Psychology,
-                                contentDescription = "Live Insights",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
+                                imageVector  Icons.Default.Psychology,
+                                contentDescription  "Live Insights",
+                                tint  MaterialTheme.colorScheme.primary,
+                                modifier  Modifier.size(20.dp)
                             )
                             Text(
-                                text = "Live Insights",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
+                                text  "Live Insights",
+                                style  MaterialTheme.typography.titleMedium,
+                                fontWeight  FontWeight.Bold
                             )
                         }
                         
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement  Arrangement.spacedBy(4.dp)
                         ) {
                             IconButton(
-                                onClick = { showLiveMode = !showLiveMode },
-                                modifier = Modifier.size(32.dp)
+                                onClick  { showLiveMode  !showLiveMode },
+                                modifier  Modifier.size(32.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (showLiveMode) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = if (showLiveMode) "Pause" else "Start",
-                                    modifier = Modifier.size(16.dp)
+                                    imageVector  if (showLiveMode) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription  if (showLiveMode) "Pause" else "Start",
+                                    modifier  Modifier.size(16.dp)
                                 )
                             }
                             
                             IconButton(
-                                onClick = { isExpanded = false },
-                                modifier = Modifier.size(32.dp)
+                                onClick  { isExpanded  false },
+                                modifier  Modifier.size(32.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Minimize,
-                                    contentDescription = "Minimize",
-                                    modifier = Modifier.size(16.dp)
+                                    imageVector  Icons.Default.Minimize,
+                                    contentDescription  "Minimize",
+                                    modifier  Modifier.size(16.dp)
                                 )
                             }
                             
                             IconButton(
-                                onClick = onClose,
-                                modifier = Modifier.size(32.dp)
+                                onClick  onClose,
+                                modifier  Modifier.size(32.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Close",
-                                    modifier = Modifier.size(16.dp)
+                                    imageVector  Icons.Default.Close,
+                                    contentDescription  "Close",
+                                    modifier  Modifier.size(16.dp)
                                 )
                             }
                         }
                     }
                     
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier  Modifier.height(12.dp))
                     
                     // Status and confidence
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement  Arrangement.spacedBy(12.dp),
+                        verticalAlignment  Alignment.CenterVertically
                     ) {
                         Text(
-                            text = status,
-                            color = when (status) {
-                                "Listening..." -> Color(0xFF4CAF50)
-                                "Processing..." -> Color(0xFFFF9800)
-                                else -> MaterialTheme.colorScheme.onSurface
+                            text  status,
+                            color  when (status) {
+                                "Listening..." - Color(0xFF4CAF50)
+                                "Processing..." - Color(0xFFFF9800)
+                                else - MaterialTheme.colorScheme.onSurface
                             },
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
+                            style  MaterialTheme.typography.bodyMedium,
+                            fontWeight  FontWeight.Medium
                         )
                         
                         if (liveInsights.isNotEmpty()) {
                             ConfidenceMeter(
-                                confidence = liveInsights.maxOfOrNull { it.confidence } ?: 0f,
-                                modifier = Modifier
+                                confidence  liveInsights.maxOfOrNull { it.confidence } ?: 0f,
+                                modifier  Modifier
                             )
                         }
                     }
                     
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier  Modifier.height(12.dp))
                     
                     // Smart Suggestions
                     if (suggestions.isNotEmpty()) {
                         SmartSuggestionsBar(
-                            suggestions = suggestions,
-                            onSuggestionClick = { suggestion ->
+                            suggestions  suggestions,
+                            onSuggestionClick  { suggestion -
                                 // Handle suggestion click
-                                lastResponse = "Applied: ${suggestion.text}"
+                                lastResponse  "Applied: ${suggestion.text}"
                             }
                         )
                         
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier  Modifier.height(12.dp))
                     }
                     
                     // Live Insights List
                     LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier  Modifier.weight(1f),
+                        verticalArrangement  Arrangement.spacedBy(8.dp)
                     ) {
-                        items(liveInsights) { insight ->
+                        items(liveInsights) { insight -
                             InsightCard(
-                                insight = insight,
-                                modifier = Modifier.fillMaxWidth()
+                                insight  insight,
+                                modifier  Modifier.fillMaxWidth()
                             )
                         }
                         
                         if (liveInsights.isEmpty() && !showLiveMode) {
                             item {
                                 Box(
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                                    contentAlignment = Alignment.Center
+                                    modifier  Modifier.fillMaxWidth().padding(vertical  32.dp),
+                                    contentAlignment  Alignment.Center
                                 ) {
                                     Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        horizontalAlignment  Alignment.CenterHorizontally,
+                                        verticalArrangement  Arrangement.spacedBy(8.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.PlayArrow,
-                                            contentDescription = "Start Live Mode",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(32.dp)
+                                            imageVector  Icons.Default.PlayArrow,
+                                            contentDescription  "Start Live Mode",
+                                            tint  MaterialTheme.colorScheme.primary,
+                                            modifier  Modifier.size(32.dp)
                                         )
                                         Text(
-                                            text = "Tap play to start Live Insight Mode",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            text  "Tap play to start Live Insight Mode",
+                                            style  MaterialTheme.typography.bodySmall,
+                                            color  MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
@@ -308,10 +460,10 @@ fun OverlayContent(
                     
                     // Quick Actions
                     if (showLiveMode) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier  Modifier.height(8.dp))
                         QuickActionSuggestions(
-                            onAction = { action ->
-                                lastResponse = "Action: $action"
+                            onAction  { action -
+                                lastResponse  "Action: $action"
                             }
                         )
                     }
@@ -320,49 +472,49 @@ fun OverlayContent(
         } else {
             // Compact Mode
             Card(
-                modifier = Modifier
-                    .size(width = 200.dp, height = 120.dp)
+                modifier  Modifier
+                    .size(width  200.dp, height  120.dp)
                     .background(
-                        Color.Black.copy(alpha = 0.8f),
+                        Color.Black.copy(alpha  0.8f),
                         RoundedCornerShape(12.dp)
                     )
                     .pointerInput(Unit) {
                         detectDragGestures(
-                            onDragStart = { isDragging = true },
-                            onDragEnd = { isDragging = false }
-                        ) { _, _ ->
+                            onDragStart  { isDragging  true },
+                            onDragEnd  { isDragging  false }
+                        ) { _, _ -
                             // Handle drag movement
                         }
                     },
-                colors = CardDefaults.cardColors(
-                    containerColor = Color.Black.copy(alpha = 0.8f)
+                colors  CardDefaults.cardColors(
+                    containerColor  Color.Black.copy(alpha  0.8f)
                 ),
-                shape = RoundedCornerShape(12.dp)
+                shape  RoundedCornerShape(12.dp)
             ) {
                 Column(
-                    modifier = Modifier
+                    modifier  Modifier
                         .fillMaxSize()
                         .padding(12.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
+                    verticalArrangement  Arrangement.SpaceBetween
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
+                        modifier  Modifier.fillMaxWidth(),
+                        horizontalArrangement  Arrangement.SpaceBetween,
+                        verticalAlignment  Alignment.Top
                     ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            verticalAlignment  Alignment.CenterVertically,
+                            horizontalArrangement  Arrangement.spacedBy(4.dp)
                         ) {
                             Text(
-                                text = "Aura",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
+                                text  "Aura",
+                                color  Color.White,
+                                fontSize  14.sp,
+                                fontWeight  FontWeight.Bold
                             )
                             if (liveInsights.isNotEmpty()) {
                                 Box(
-                                    modifier = Modifier
+                                    modifier  Modifier
                                         .size(6.dp)
                                         .background(
                                             Color(0xFF4CAF50),
@@ -373,21 +525,21 @@ fun OverlayContent(
                         }
                         
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement  Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.OpenInFull,
-                                contentDescription = "Expand",
-                                tint = Color.White,
-                                modifier = Modifier
+                                imageVector  Icons.Default.OpenInFull,
+                                contentDescription  "Expand",
+                                tint  Color.White,
+                                modifier  Modifier
                                     .size(16.dp)
-                                    .clickable { isExpanded = true }
+                                    .clickable { isExpanded  true }
                             )
                             Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close",
-                                tint = Color.White,
-                                modifier = Modifier
+                                imageVector  Icons.Default.Close,
+                                contentDescription  "Close",
+                                tint  Color.White,
+                                modifier  Modifier
                                     .size(16.dp)
                                     .clickable { onClose() }
                             )
@@ -396,41 +548,41 @@ fun OverlayContent(
                     
                     Column {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            horizontalArrangement  Arrangement.spacedBy(8.dp),
+                            verticalAlignment  Alignment.CenterVertically
                         ) {
                             Text(
-                                text = status,
-                                color = when (status) {
-                                    "Listening..." -> Color.Green
-                                    "Processing..." -> Color.Yellow
-                                    else -> Color.White
+                                text  status,
+                                color  when (status) {
+                                    "Listening..." - Color.Green
+                                    "Processing..." - Color.Yellow
+                                    else - Color.White
                                 },
-                                fontSize = 12.sp
+                                fontSize  12.sp
                             )
                             
                             if (liveInsights.isNotEmpty()) {
                                 Text(
-                                    text = "${liveInsights.size}",
-                                    color = Color(0xFF4CAF50),
-                                    fontSize = 10.sp,
-                                    modifier = Modifier
+                                    text  "${liveInsights.size}",
+                                    color  Color(0xFF4CAF50),
+                                    fontSize  10.sp,
+                                    modifier  Modifier
                                         .background(
-                                            Color(0xFF4CAF50).copy(alpha = 0.2f),
+                                            Color(0xFF4CAF50).copy(alpha  0.2f),
                                             RoundedCornerShape(4.dp)
                                         )
-                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                        .padding(horizontal  4.dp, vertical  2.dp)
                                 )
                             }
                         }
                         
                         if (lastResponse.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier  Modifier.height(4.dp))
                             Text(
-                                text = lastResponse.take(50) + if (lastResponse.length > 50) "..." else "",
-                                color = Color.White,
-                                fontSize = 10.sp,
-                                lineHeight = 12.sp
+                                text  lastResponse.take(50) + if (lastResponse.length  50) "..." else "",
+                                color  Color.White,
+                                fontSize  10.sp,
+                                lineHeight  12.sp
                             )
                         }
                     }

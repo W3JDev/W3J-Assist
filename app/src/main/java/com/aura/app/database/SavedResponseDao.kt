@@ -20,4 +20,10 @@ interface SavedResponseDao {
     
     @Query("SELECT COUNT(*) FROM saved_responses")
     suspend fun getResponseCount(): Int
+    
+    @Query("SELECT * FROM saved_responses ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestResponse(): SavedResponse?
+    
+    @Query("SELECT * FROM saved_responses ORDER BY timestamp DESC")
+    suspend fun getAllResponsesOnce(): List<SavedResponse>
 }

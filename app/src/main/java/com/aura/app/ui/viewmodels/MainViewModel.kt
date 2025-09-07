@@ -87,4 +87,34 @@ class MainViewModel : ViewModel() {
             database.savedResponseDao().insertResponse(response)
         }
     }
+    
+    /**
+     * Resume voice recognition from pause
+     */
+    fun resumeVoiceRecognition(context: Context) {
+        val intent = Intent(context, WakeWordService::class.java)
+        intent.action = "RESUME_LISTENING"
+        context.startService(intent)
+    }
+    
+    /**
+     * Manual trigger for voice commands via UI
+     */
+    fun processVoiceCommand(context: Context, command: String) {
+        viewModelScope.launch {
+            val voiceCommandProcessor = com.aura.app.utils.VoiceCommandProcessor(context)
+            val response = voiceCommandProcessor.processVoiceCommand(command)
+            
+            // Save the interaction
+            val savedResponse = SavedResponse(
+                timestamp = System.currentTimeMillis(),
+                inputText = command,
+                aiResponse = response,
+                inputType = "manual_voice"
+            )
+            database.savedResponseDao().insertResponse(savedResponse)
+            
+            voiceCommandProcessor.cleanup()
+        }
+    }
 }
