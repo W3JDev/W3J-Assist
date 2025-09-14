@@ -74,7 +74,7 @@ class OverlayService : Service() {
         enableRealTimeProcessing = true
     ))
     
-    override fun onBind(intent: Intent?): IBinder?  null
+    override fun onBind(intent: Intent?): IBinder? = null
     
     override fun onCreate() {
         super.onCreate()
