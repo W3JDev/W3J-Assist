@@ -101,8 +101,8 @@ class OverlayService : Service() {
         // Receiver for voice responses
         voiceResponseReceiver  object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                val response  intent?.getStringExtra("response") ?: ""
-                val command  intent?.getStringExtra("command") ?: ""
+                val response = intent?.getStringExtra("response") ?: ""
+                val command = intent?.getStringExtra("command") ?: ""
                 val insightType = intent?.getStringExtra("insightType")?.let { 
                     InsightType.valueOf(it) 
                 } ?: InsightType.TALKING_POINT
